@@ -1,0 +1,10 @@
+iter=1
+nohup parallel --jobs 2 --joblog analysis/sim_traits/genomic_prediction_stage2.cor-curve.sim-traits.iter${iter}.no-AD.parallel.log < scripts/commands_stage2-prediction.cor-curve.sim-traits.iter${iter}.no-AD.txt 2> analysis/sim_traits/genomic_prediction_stage2.cor-curve.sim-traits.iter${iter}.no-AD.log &
+
+# # to kill job -- get PID then send TERM signal twice
+# # use negative PID number to kill all processes
+# ps xw | grep parallel
+# kill -TERM -36087
+# kill -TERM -36087
+
+# less analysis/sim_traits/genomic_prediction_stage2.cor-curve.sim-traits.iter${iter}.no-AD.parallel.log | wc -l
