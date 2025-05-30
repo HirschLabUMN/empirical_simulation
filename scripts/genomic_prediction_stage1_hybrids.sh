@@ -59,7 +59,7 @@ for TRAIT in YLD EHT PHT Moisture; do
     for NMARKERS in 1 3 5 10 20 30 40 50 60 70 80 90 100 150 200 250 300 350; do
       for EFFECT in 1 0.1; do
         # get folder name
-        FOLDER=analysis/sim_traits/${TRAIT}/traits/avg_rank_all/n_markers_${NMARKERS}/effects_${EFFECT}/
+        FOLDER=analysis/sim_traits/${TRAIT}/traits/michael_method/n_markers_${NMARKERS}/effects_${EFFECT}/
         # check if sim file exists first
         INFILE=$(echo ${FOLDER}/Simulated_Data*)
         if [[ -e ${INFILE} ]]; then

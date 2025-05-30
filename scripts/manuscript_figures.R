@@ -6,9 +6,10 @@
 library(tidyverse)
 library(readxl)
 library(ggridges)
+library(ggbreak)
 
 # Set working directory
-setwd('~/empirical_sim/')
+setwd('/home/hirschc1/burns756/empirical_sim/')
 
 # Figure 1A:
 # Create a list of the files in data with the pattern "per-env"
@@ -68,9 +69,10 @@ for(file in files){
                                           source == 'rep:environment' ~ 'Env/Rep',
                                           source == 'genotype:environment' ~ 'Genotype x Env',
                                           source == 'residual' ~ 'Residual')) %>%
-                select(source, pve) %>%
                 mutate(trait = trait))
 }
+
+write_csv(data_storage, 'Manuscript_Table_2.csv')
 
 # Plot the pve for empirical traits
 emp_pve_plot = data_storage %>%
@@ -119,6 +121,9 @@ for(file in files){
                        env = env,
                        model = model))
 }
+
+# Save the GWAS data
+write_csv(gwas_data, 'Manuscript_Supplemental_Table_All_GWAS_Data.csv')
 
 # Average the p-values across environments within each trait
 avg_gwas_data = gwas_data %>%
@@ -206,7 +211,8 @@ cor_plot_1 = data %>%
          trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield'))) %>%
   ggplot(aes(x = n_marker, y = Cor, color = Type))+
   stat_summary(show.legend = F)+
-  geom_smooth(formula = 'y~log(x)',
+  geom_smooth(method = 'lm',
+              formula = 'y~log(x)',
               #linewidth = 3,
               se = F,
               show.legend = F)+
@@ -224,7 +230,7 @@ cor_plot_1 = data %>%
 cor_plot_1
 
 # Save plot
-ggsave('Manuscript_Figure_3A.png', plot = cor_plot_1, device = 'png', width = 3.4, height = 4, units = 'in', dpi = 300)
+ggsave('Manuscript_Figure_3A.png', plot = cor_plot_1, device = 'png', width = 3.75, height = 3, units = 'in', dpi = 300)
 
 # Figure 3B:
 # Saturation curve for simulations using reduced marker effects
@@ -241,8 +247,9 @@ cor_plot_0.1 = data %>%
                            trait == 'YLD' ~ 'Yield'),
          trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield'))) %>%
   ggplot(aes(x = n_marker, y = Cor, color = Type))+
-  stat_summary()+
-  geom_smooth(formula = 'y~log(x)',
+  stat_summary(show.legend = F)+
+  geom_smooth(method = 'lm',
+              formula = 'y~log(x)',
               #linewidth = 3,
               se = F,
               show.legend = F)+
@@ -255,56 +262,211 @@ cor_plot_0.1 = data %>%
   facet_wrap(~trait)+
   theme_classic()+
   theme(text = element_text(size = 12, color = 'black'),
-        legend.position = 'right',
-        legend.text = element_text(angle = 90, hjust = 0.5),
-        legend.key.height = unit(1, 'in'))
+        #legend.position = 'right',
+        #legend.text = element_text(angle = 90, hjust = 0.5),
+        #legend.key.height = unit(1, 'in')
+        )
 
 # Display plot
 cor_plot_0.1
 
 # Save plot
-ggsave('Manuscript_Figure_3B.png', plot = cor_plot_0.1, device = 'png', width = 4.1, height = 4, units = 'in', dpi = 300)
+ggsave('Manuscript_Figure_3B.png', plot = cor_plot_0.1, device = 'png', width = 3.75, height = 3, units = 'in', dpi = 300)
 
 # Figure 3C:
-# Plot simulation value distributions together
-# Plot data using ridges
-summ_stats_plot_comb = sim_values_0.1 %>% 
-  mutate(effect = '0.1') %>%
-  bind_rows(sim_values_1 %>%
-              mutate(effect = '1')) %>%
-  rename(Sim_Values = sim_value_avg,
-         E = real_pheno) %>%
-  pivot_wider(id_cols = c(hybrid, env, trait, E, effect),
-              names_from = marker,
-              values_from = Sim_Values) %>%
-  pivot_longer(cols = -c(hybrid, env, trait, effect),
-               names_to = 'Marker',
-               values_to = 'Value') %>%
-  mutate(Marker = factor(Marker, levels = rev(c('E','5','10','20','30','40','50','60','70','80','90','100','150','200','250','300','350')))) %>%
+# Aggregate Data
+# List out variables of interest
+traits = c('EHT', 'PHT', 'YLD', 'Moisture')
+n_markers = c(5,10,20,30,40,50,60,70,80,90,100,150,200,250,300,350)
+
+sim_real_data_storage = tibble()
+for(trait in traits){
+  for(n_marker in n_markers){
+    for(effect in c('0.1', '1')){
+        
+        print(paste('---', trait, n_marker, '---'))
+        
+        PATH = paste0('analysis/sim_traits/',
+                      trait,
+                      '/traits/michael_method/n_markers_',
+                      n_marker,
+                      '/effects_', effect, '/sim_vs_real_data.txt')
+        
+        sim_real_data_storage = sim_real_data_storage %>%
+              bind_rows(read.delim(PATH) %>%
+                          mutate(trait = trait,
+                                 n_markers = n_marker,
+                                 effect = effect))
+    }
+  }
+}
+
+# Determine F Ratio and T value over many markers (IF THIS WORKS, MOVE THE LOOPS FROM BELOW UP HERE)
+# Across Environments
+similarity_across = sim_real_data_storage %>%
+  group_by(trait, n_markers, effect) %>%
+  summarise(f_ratio = log(var.test(real_pheno, sim_value_avg)[[1]]),
+            t_value = t.test(real_pheno, sim_value_avg)[[1]]) %>%
+  mutate(env = 'across')
+
+similarity_within = sim_real_data_storage %>%
+  group_by(env, trait, n_markers, effect) %>%
+  summarise(f_ratio = log(var.test(real_pheno, sim_value_avg)[[1]]),
+            t_value = t.test(real_pheno, sim_value_avg)[[1]])
+
+similarity_data_combined = similarity_across %>%
+  mutate(Type = 'Across Env') %>%
+  bind_rows(similarity_within %>%
+              mutate(Type = 'Within Env'))
+
+# Determine KS Test Information
+# List out variables of interest
+traits = c('EHT', 'PHT', 'YLD', 'Moisture')
+n_markers = c(5,10,20,30,40,50,60,70,80,90,100,150,200,250,300,350)
+
+ks_data_storage = tibble()
+for(t in traits){
+  for(n in n_markers){
+    for(e in c('0.1', '1')){
+
+      print(paste('---', t, n, e, '---'))
+      
+      temp_data = sim_real_data_storage %>%
+        filter(trait == t,
+               n_markers == n,
+               effect == e)
+      
+      ks_data_storage = ks_data_storage %>%
+        bind_rows(tibble(ks_d = ks.test(temp_data$sim_value_avg, temp_data$real_pheno)[[1]],
+                         trait = t,
+                         n_markers = n,
+                         effect = e,
+                         Type = 'Across Env',
+                         env = 'across'))
+      
+      for(en in unique(temp_data$env)){
+        temp_data_env = temp_data %>%
+          filter(env == en)
+        
+        ks_data_storage = ks_data_storage %>%
+          bind_rows(tibble(ks_d = ks.test(temp_data_env$sim_value_avg, temp_data_env$real_pheno)[[1]],
+                           trait = t,
+                           n_markers = n,
+                           effect = e,
+                           env = en,
+                           Type = 'Within Env'))
+      }
+    }
+  }
+}
+
+# Combine Data
+comb_perf_data = data %>% 
+  pivot_longer(cols = c(cor_across_envs, cor_within_envs),
+               names_to = 'Type',
+               values_to = 'cor') %>%
+  mutate(Type = case_when(str_detect(Type, 'across') ~ 'Across Env',
+                          T ~ 'Within Env'),
+         effect = as.character(effect)) %>%
+  rename(n_markers = n_marker) %>%
+  distinct() %>%
+  full_join(ks_data_storage) %>%
+  full_join(similarity_data_combined)
+  
+# Plot it out
+comb_perf_plot_1 = comb_perf_data %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
   mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
                            trait == 'PHT' ~ 'Plant Height',
                            trait == 'Moisture' ~ 'Moisture',
                            trait == 'YLD' ~ 'Yield'),
          trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
-         effect = factor(effect, levels = c('1', '0.1'))) %>%
-  ggplot(aes(x = Value,
-             y = Marker))+
-  geom_density_ridges(scale = 1)+
-  scale_x_continuous(breaks = scales::pretty_breaks(n=3))+
-  ggh4x::facet_nested_wrap(~effect + trait, nrow = 1, scales = 'free_x', )+
-  labs(x = 'Phenotypic Value',
-       y = 'Number of Causitive Markers',
-       tag = 'C')+
+         Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(effect == 1) %>%
+  ggplot(aes(x = n_markers, y = Performance, color = Type))+
+  stat_summary(geom = 'point',
+               show.legend = F)+
+  geom_smooth(method = 'lm',
+              formula = 'y~log(x)',
+              #linewidth = 3,
+              se = F,
+              show.legend = F)+
+  #ylim(0,1)+
+  scale_color_manual(values = c('darkgreen', 'darkblue'))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = NULL,
+       tag = 'A')+
+  facet_grid(Metric~trait, scales = 'free_y')+
+  scale_y_continuous(n.breaks = 4)+
   theme_classic()+
   theme(text = element_text(size = 12, color = 'black'),
-        axis.text.x = element_text(angle = 45, hjust = 1),
-        panel.spacing = unit(0.01, 'in'))
+        strip.text = element_text(size = 8)
+        #legend.position = 'bottom',
+        #legend.text = element_text(angle = 90, hjust = 0.5),
+        #legend.key.height = unit(1, 'in')
+  )
 
-# Display plot
-summ_stats_plot_comb
+comb_perf_plot_1
 
-# Save plot
-ggsave('Manuscript_Figure_3C.png', plot = summ_stats_plot_comb, device = 'png', width = 7.5, height = 3.5, units = 'in', dpi = 300)
+# Save figure
+ggsave('Manuscript_Figure_3A2.png', plot = comb_perf_plot_1, device = 'png', width = 7.5, height = 4, units = 'in', dpi = 300)
+
+
+comb_perf_plot_0.1 = comb_perf_data %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(effect == 0.1) %>%
+  ggplot(aes(x = n_markers, y = Performance, color = Type))+
+  stat_summary(geom = 'point')+
+  geom_smooth(method = 'lm',
+              formula = 'y~log(x)',
+              #linewidth = 3,
+              se = F)+
+  #ylim(0,1)+
+  scale_color_manual(values = c('darkgreen', 'darkblue'))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = NULL,
+       tag = 'B')+
+  facet_grid(Metric~trait, scales = 'free_y', )+
+  scale_y_continuous(n.breaks = 3.5)+
+  theme_classic()+
+  theme(text = element_text(size = 12, color = 'black'),
+        legend.position = 'bottom',
+        strip.text = element_text(size = 8)
+        #legend.text = element_text(angle = 90, hjust = 0.5),
+        #legend.key.height = unit(1, 'in')
+  )
+
+comb_perf_plot_0.1
+
+# Save figure
+ggsave('Manuscript_Figure_3B2.png', plot = comb_perf_plot_0.1, device = 'png', width = 7.5, height = 4.5, units = 'in', dpi = 300)
+
 
 # Figure 4:
 # Read in summary data for simulated traits
@@ -338,7 +500,7 @@ combined_pve_plot = sim_pve_data %>%
                      trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
                      effect = as.factor('E'),
                      n_marker = as.factor('Empirical'))) %>%
-  mutate(effect = factor(effect, levels = c('E', '0.1', '1'))) %>%
+  mutate(effect = factor(effect, levels = c('1', 'E', '0.1'))) %>%
   arrange(effect, trait, source) %>%
   ggplot(aes(x = factor(n_marker), y = pve, fill = source, color = source))+
   geom_bar(stat = 'identity', position = 'stack')+
@@ -361,107 +523,282 @@ combined_pve_plot
 
 ggsave('Manuscript_Figure_4.png', plot = combined_pve_plot, device = 'png', width = 7.5, height = 5.5, units = 'in', dpi = 300)
 
+# Figure XX:
+# Comparison: Genomic Prediction of Simulated Data to Simulated Data
+# Bonus: How does the performance of simulated data compare to genomic prediction in empirical data?
+# Data
+traits = c('EHT', 'PHT', 'YLD', 'Moisture')
+n_markers = c(5,10,20,30,40,50,60,70,80,90,100,150,200,250,300,350)
+models = c('A', 'D')
+
+# Create dataset for simulated trait predictions
+data_storage = tibble()
+for(trait in traits){
+  for(n_marker in n_markers){
+    for(effect in c('0.1')){
+      for(model in models){
+        
+        print(paste('---', trait, n_marker, model, '---'))
+        
+        for(iter in 1:3){
+          PATH_SIM = paste0('analysis/sim_traits/',
+                        trait,
+                        '/traits/michael_method/n_markers_',
+                        n_marker,
+                        '/effects_', effect, '/prediction_results/iter', iter, '/model-',
+                        model,
+                        '/Gstr-fa_Rstr-diag/')
+          
+          PATH_EMP = paste0('analysis/empirical_traits/',
+                            trait,
+                            '/prediction_results/iter', iter, '/model-',
+                            model,
+                            '/Gstr-fa_Rstr-diag/')
+          
+          for(cv in 1:2){
+            if(file.exists(paste0(PATH_SIM, 'GEBVs.CV', cv, '.txt'))){
+              data_storage = data_storage %>%
+                bind_rows(read.delim(paste0(PATH_SIM, 'GEBVs.CV', cv, '.txt')) %>%
+                            pivot_longer(cols = -genotype,
+                                         names_to = 'env_iter',
+                                         values_to = 'trait_value') %>%
+                            separate(env_iter, into = c('env', NA), sep = '_') %>%
+                            group_by(genotype, env) %>%
+                            summarise(GEBV = mean(trait_value)) %>%
+                            mutate(trait = trait,
+                                   n_markers = n_marker,
+                                   model = model,
+                                   effect = effect,
+                                   cv = cv,
+                                   iter = iter,
+                                   type = 'Sim'))
+            }
+            
+            if(file.exists(paste0(PATH_EMP, 'GEBVs.CV', cv, '.txt'))){
+              data_storage = data_storage %>%
+                bind_rows(read.delim(paste0(PATH_EMP, 'GEBVs.CV', cv, '.txt')) %>%
+                            pivot_longer(cols = -genotype,
+                                         names_to = 'env_iter',
+                                         values_to = 'trait_value') %>%
+                            separate(env_iter, into = c('env', NA), sep = '_') %>%
+                            group_by(genotype, env) %>%
+                            summarise(GEBV = mean(trait_value)) %>%
+                            mutate(trait = trait,
+                                   model = model,
+                                   cv = cv,
+                                   iter = iter,
+                                   type = 'Emp')) %>%
+                distinct(.keep_all = T)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+sim_real_cleaned = sim_real_data_storage %>%
+  pivot_longer(cols = c(sim_value_avg, real_pheno),
+               names_to = 'type',
+               values_to = 'pheno') %>%
+  mutate(env = case_when(trait == 'EHT' & env == 'COR19' ~ 'env1',
+                         trait == 'EHT' & env == 'MIN19' ~ 'env2',
+                         trait == 'EHT' & env == 'MIN20' ~ 'env3',
+                         trait == 'EHT' & env == 'URB19' ~ 'env4',
+                         trait == 'PHT' & env == 'COR19' ~ 'env1',
+                         trait == 'PHT' & env == 'COR20' ~ 'env2',
+                         trait == 'PHT' & env == 'MIN19' ~ 'env3',
+                         trait == 'PHT' & env == 'MIN20' ~ 'env4',
+                         trait == 'PHT' & env == 'URB19' ~ 'env5',
+                         trait == 'Moisture' & env == 'BAY19' ~ 'env1',
+                         trait == 'Moisture' & env == 'BEC-BL19' ~ 'env2',
+                         trait == 'Moisture' & env == 'BEC-BL20' ~ 'env3',
+                         trait == 'Moisture' & env == 'BEC-EP20' ~ 'env4',
+                         trait == 'Moisture' & env == 'COR19' ~ 'env5',
+                         trait == 'Moisture' & env == 'COR20' ~ 'env6',
+                         trait == 'Moisture' & env == 'MIN19' ~ 'env7',
+                         trait == 'Moisture' & env == 'MIN20' ~ 'env8',
+                         trait == 'Moisture' & env == 'SYN19' ~ 'env9',
+                         trait == 'Moisture' & env == 'SYN20' ~ 'env10',
+                         trait == 'Moisture' & env == 'URB19' ~ 'env11',
+                         trait == 'YLD' & env == 'BEC-BL19' ~ 'env1',
+                         trait == 'YLD' & env == 'BEC-BL20' ~ 'env2',
+                         trait == 'YLD' & env == 'BEC-EP20' ~ 'env3',
+                         trait == 'YLD' & env == 'COR19' ~ 'env4',
+                         trait == 'YLD' & env == 'COR20' ~ 'env5',
+                         trait == 'YLD' & env == 'MIN19' ~ 'env6',
+                         trait == 'YLD' & env == 'MIN20' ~ 'env7',
+                         trait == 'YLD' & env == 'SYN19' ~ 'env8',
+                         trait == 'YLD' & env == 'SYN20' ~ 'env9',
+                         trait == 'YLD' & env == 'URB19' ~ 'env10'),
+         type = case_when(type == 'sim_value_avg' ~ 'Sim',
+                          type == 'real_pheno' ~ 'Emp')) %>%
+  rename(genotype = hybrid) %>%
+  mutate(n_markers = as.character(n_markers),
+         effect = as.character(effect),
+         n_markers = case_when(type == 'Emp' ~ 'E',
+                               T ~ n_markers),
+         effect = case_when(type == 'Emp' ~ 'E',
+                            T ~ effect))
+
+gp_to_true_data = data_storage %>%
+  mutate(n_markers = as.character(n_markers),
+         effect = as.character(effect),
+         n_markers = case_when(type == 'Emp' ~ 'E',
+                               T ~ n_markers),
+         effect = case_when(type == 'Emp' ~ 'E',
+                            T ~ effect)) %>%
+  left_join(sim_real_cleaned) %>%
+  distinct(.keep_all = T) %>%
+  group_by(env, trait, n_markers, model, effect, cv, type) %>%
+  summarise(cor = cor(GEBV, pheno, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(pheno, GEBV)[[1]],
+            f_ratio = log(var.test(pheno, GEBV)[[1]]),
+            t_value = t.test(pheno, GEBV)[[1]])
+
+gp_emp_baseline = gp_to_true_data %>%
+  filter(type == 'Emp') %>%
+  group_by(trait, n_markers, model, effect, cv, type) %>%
+  summarise(cor = mean(cor),
+            ks_d = mean(ks_d),
+            f_ratio = mean(f_ratio),
+            t_value = mean(t_value)) %>%
+  mutate(cv = paste0('CV', cv)) %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         model = case_when(model == 'A' ~ 'Additive',
+                           model == 'D' ~ 'Dominance')) %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)')))
+
+# Additive Model
+gp_to_true_plot_add = gp_to_true_data %>%
+  filter(type == 'Sim') %>%
+  mutate(cv = paste0('CV', cv),
+         n_markers = as.numeric(n_markers)) %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         model = case_when(model == 'A' ~ 'Additive',
+                           model == 'D' ~ 'Dominance')) %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Additive') %>%
+  ggplot(aes(x = n_markers, y = Performance, color = cv))+
+  geom_smooth(se = F, show.legend = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(show.legend = F, geom = 'point')+
+  geom_hline(data = gp_emp_baseline %>% filter(model == 'Additive'),
+             mapping = aes(yintercept = Performance, color = cv),
+             linetype = 'dashed',
+             show.legend = F)+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = 'Model Type',
+       tag = 'A')+
+  facet_grid(Metric~trait, scales = 'free_y')+
+  theme_classic()+
+  theme(legend.position = 'bottom',
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
+
+# Display plot
+gp_to_true_plot_add
+
+# Save plot
+ggsave('Manuscript_Figure_XA.png', plot = gp_to_true_plot_add, device = 'png', width = 7.5, height = 4, units = 'in', dpi = 300)
+
+# Additive Model
+gp_to_true_plot_dom = gp_to_true_data %>%
+  filter(type == 'Sim') %>%
+  mutate(cv = paste0('CV', cv),
+         n_markers = as.numeric(n_markers)) %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         model = case_when(model == 'A' ~ 'Additive',
+                           model == 'D' ~ 'Dominance')) %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Dominance') %>%
+  ggplot(aes(x = n_markers, y = Performance, color = cv))+
+  geom_smooth(se = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(geom = 'point')+
+  geom_hline(data = gp_emp_baseline %>% filter(model == 'Dominance'),
+             mapping = aes(yintercept = Performance, color = cv),
+             linetype = 'dashed',
+             show.legend = F)+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = 'Model Type',
+       tag = 'B')+
+  facet_grid(Metric~trait, scales = 'free_y')+
+  theme_classic()+
+  theme(legend.position = 'bottom',
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
+
+# Display plot
+gp_to_true_plot_dom
+
+# Save plot
+ggsave('Manuscript_Figure_XB.png', plot = gp_to_true_plot_dom, device = 'png', width = 7.5, height = 4.5, units = 'in', dpi = 300)
+
+
 # Figure 5:
 # Comparison: Genomic Prediction of Simulated Data vs Empirical Data
-# Data storage
-# sim_genomic_predictions = tibble()
-# 
-# # Loop through to collect data for genomic predictions of simulations
-# for(trait in c('EHT', 'PHT', 'Moisture', 'YLD')){
-#   # Print iteration
-#   print(paste('---', trait, '---'))
-#   for(n_marker in c(5,10,20,30,40,50,60,70,80,90,100,150,200,250,300,350)){
-#     if(n_marker %% 50 == 0){
-#       print(n_marker)
-#     }
-#     for(iter in 1:3){
-#       for(model in c('A', 'D')){
-#         for(cv in 1:2){
-#           # Read in data
-#           sim_genomic_predictions = sim_genomic_predictions %>%
-#             bind_rows(suppressMessages(read_delim(paste0('analysis/sim_traits/',
-#                                                          trait,
-#                                                          '/traits/michael_method/n_markers_',
-#                                                          n_marker,
-#                                                          '/effects_0.1/prediction_results/iter',
-#                                                          iter,
-#                                                          '/model-',
-#                                                          model,
-#                                                          '/Gstr-fa_Rstr-diag/GEBVs.CV',
-#                                                          cv,
-#                                                          '.txt')) %>%
-#                         pivot_longer(cols = -genotype,
-#                                      names_to = 'env_rep',
-#                                      values_to = 'predictions') %>%
-#                         separate(env_rep, into = c('env', 'rep'), sep = '_') %>%
-#                         group_by(genotype, env) %>%
-#                         summarise(predictions = mean(predictions, na.rm = T)) %>%
-#                         mutate(trait = trait,
-#                                marker = n_marker,
-#                                iter = iter,
-#                                model = model,
-#                                cv = cv)))
-#         }
-#       }
-#     }
-#   }
-# }
-# 
-# sim_genomic_predictions %>% 
-#   group_by(genotype, env, trait, marker, model, cv) %>%
-#   summarise(predictions = mean(predictions, na.rm = T)) %>%
-#   write_csv('analysis/sim_traits/sim_genomic_predictions.csv')
-# 
-# read_delim('data/1stStage_BLUEs.EHT-per-env.txt') %>%
-#   mutate(env = case_when(env == 'COR19' ~ 'env1',
-#                          env == 'MIN19' ~ 'env2',
-#                          env == 'MIN20' ~ 'env3',
-#                          env == 'URB19' ~ 'env4'),
-#          trait = 'EHT') %>%
-#   bind_rows(read_delim('data/1stStage_BLUEs.PHT-per-env.txt') %>%
-#               mutate(env = case_when(env == 'COR19' ~ 'env1',
-#                                      env == 'COR20' ~ 'env2',
-#                                      env == 'MIN19' ~ 'env3',
-#                                      env == 'MIN20' ~ 'env4',
-#                                      env == 'URB19' ~ 'env5'),
-#                      trait = 'PHT')) %>%
-#   bind_rows(read_delim('data/1stStage_BLUEs.Moisture-per-env.txt') %>%
-#               mutate(env = case_when(env == 'BAY19' ~ 'env1',
-#                                      env == 'BEC-BL19' ~ 'env2',
-#                                      env == 'BEC-BL20' ~ 'env3',
-#                                      env == 'BEC-EP20' ~ 'env4',
-#                                      env == 'COR19' ~ 'env5',
-#                                      env == 'COR20' ~ 'env6',
-#                                      env == 'MIN19' ~ 'env7',
-#                                      env == 'MIN20' ~ 'env8',
-#                                      env == 'SYN19' ~ 'env9',
-#                                      env == 'SYN20' ~ 'env10',
-#                                      env == 'URB19' ~ 'env11'),
-#                      trait = 'Moisture')) %>%
-#   bind_rows(read_delim('data/1stStage_BLUEs.YLD-per-env.txt') %>%
-#               mutate(env = case_when(env == 'BEC-BL19' ~ 'env1',
-#                                      env == 'BEC-BL20' ~ 'env2',
-#                                      env == 'BEC-EP20' ~ 'env3',
-#                                      env == 'COR19' ~ 'env4',
-#                                      env == 'COR20' ~ 'env5',
-#                                      env == 'MIN19' ~ 'env6',
-#                                      env == 'MIN20' ~ 'env7',
-#                                      env == 'SYN19' ~ 'env8',
-#                                      env == 'SYN20' ~ 'env9',
-#                                      env == 'URB19' ~ 'env10'),
-#                      trait = 'YLD')) %>%
-#   write_csv('analysis/sim_traits/emp_values_per_env_renamed_envs.csv')
-
+# Data
 sim_genomic_predictions = read_csv('analysis/sim_traits/sim_genomic_predictions.csv')
 emp_values = read_csv('analysis/sim_traits/emp_values_per_env_renamed_envs.csv')
 
+# Example of data
 sim_genomic_predictions %>%
   group_by(genotype, env, trait, marker, model, cv) %>%
   summarise(predictions = mean(predictions, na.rm = T)) %>%
   left_join(emp_values,
             by = c('genotype' = 'hybrid', 'env', 'trait')) %>%
   group_by(trait, marker, env, model, cv) %>%
-  summarise(correlation = cor(predictions, real_pheno, use = 'complete.obs', method = 'pearson')) %>%
+  summarise(correlation = cor(predictions, real_pheno, use = 'complete.obs', method = 'spearman'),
+            d_stat = ks.test(real_pheno, predictions)[[1]],
+            f_ratio = log(var.test(real_pheno, predictions)[[1]]),
+            t_value = t.test(real_pheno, predictions)[[1]]) %>%
   mutate(cv = paste0('CV', cv)) %>%
   mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
                            trait == 'PHT' ~ 'Plant Height',
@@ -472,15 +809,22 @@ sim_genomic_predictions %>%
                            model == 'D' ~ 'Dominance')) %>%
   filter(marker == 200) %>%
   ungroup() %>%
-  summarise(mean(correlation))
+  summarise(mean(correlation),
+            mean(d_stat),
+            mean(f_ratio),
+            mean(t_value))
 
-sim_gp_vs_emp_plot = sim_genomic_predictions %>%
+# Additive Model
+sim_gp_vs_emp_plot_add = sim_genomic_predictions %>%
   group_by(genotype, env, trait, marker, model, cv) %>%
   summarise(predictions = mean(predictions, na.rm = T)) %>%
   left_join(emp_values,
             by = c('genotype' = 'hybrid', 'env', 'trait')) %>%
   group_by(trait, marker, env, model, cv) %>%
-  summarise(correlation = cor(predictions, real_pheno, use = 'complete.obs', method = 'pearson')) %>%
+  summarise(cor = cor(predictions, real_pheno, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(real_pheno, predictions)[[1]],
+            f_ratio = log(var.test(real_pheno, predictions)[[1]]),
+            t_value = t.test(real_pheno, predictions)[[1]]) %>%
   mutate(cv = paste0('CV', cv)) %>%
   mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
                            trait == 'PHT' ~ 'Plant Height',
@@ -489,27 +833,94 @@ sim_gp_vs_emp_plot = sim_genomic_predictions %>%
          trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
          model = case_when(model == 'A' ~ 'Additive',
                            model == 'D' ~ 'Dominance')) %>%
-  ggplot(aes(x = marker, y = correlation, color = cv))+
-  geom_smooth(se = F)+
-  stat_summary()+
-  scale_color_manual(values = c('darkred', 'darkblue'))+
-  ylim(c(0,1))+
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Additive') %>%
+  ggplot(aes(x = marker, y = Performance, color = cv))+
+  geom_smooth(se = F, show.legend = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(show.legend = F, geom = 'point')+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
   labs(x = 'Number of Causitive Markers',
-       y = "Pearson's Correlation Coefficient",
-       color = 'Model Type')+
-  facet_grid(trait~model)+
+       y = NULL,
+       color = 'Model Type',
+       tag = 'A')+
+  facet_grid(Metric~trait, scales = 'free_y')+
   theme_classic()+
   theme(legend.position = 'bottom',
-        text = element_text(size = 12, color = 'black'))
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
 
 # Display plot
-sim_gp_vs_emp_plot
+sim_gp_vs_emp_plot_add
 
 # Save plot
-ggsave('Manuscript_Figure_5.png', plot = sim_gp_vs_emp_plot, device = 'png', width = 7.5, height = 5.5, units = 'in', dpi = 300)
+ggsave('Manuscript_Figure_5A.png', plot = sim_gp_vs_emp_plot_add, device = 'png', width = 7.5, height = 4, units = 'in', dpi = 300)
+
+# Dominance Model
+sim_gp_vs_emp_plot_dom = sim_genomic_predictions %>%
+  group_by(genotype, env, trait, marker, model, cv) %>%
+  summarise(predictions = mean(predictions, na.rm = T)) %>%
+  left_join(emp_values,
+            by = c('genotype' = 'hybrid', 'env', 'trait')) %>%
+  group_by(trait, marker, env, model, cv) %>%
+  summarise(cor = cor(predictions, real_pheno, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(real_pheno, predictions)[[1]],
+            f_ratio = log(var.test(real_pheno, predictions)[[1]]),
+            t_value = t.test(real_pheno, predictions)[[1]]) %>%
+  mutate(cv = paste0('CV', cv)) %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         model = case_when(model == 'A' ~ 'Additive',
+                           model == 'D' ~ 'Dominance')) %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Dominance') %>%
+  ggplot(aes(x = marker, y = Performance, color = cv))+
+  geom_smooth(se = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(geom = 'point')+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = 'Model Type',
+       tag = 'B')+
+  facet_grid(Metric~trait, scales = 'free_y')+
+  theme_classic()+
+  theme(legend.position = 'bottom',
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
+
+# Display plot
+sim_gp_vs_emp_plot_dom
+
+# Save plot
+ggsave('Manuscript_Figure_5B.png', plot = sim_gp_vs_emp_plot_dom, device = 'png', width = 7.5, height = 4.5, units = 'in', dpi = 300)
 
 
 # Figure 6:
+# Comparision: Genomic Prediction of Simulated Data vs Genomic Prediction of Empirical Data
 # List out variables of interest
 traits = c('EHT', 'PHT', 'YLD', 'Moisture')
 n_markers = c(5,10,20,30,40,50,60,70,80,90,100,150,200,250,300,350)
@@ -604,18 +1015,34 @@ combined_data = sim_data %>%
 combined_data %>%
   filter(effect == 0.1) %>%
   group_by(trait, n_markers, env, model, cv) %>%
-  summarise(correlation = cor(sim_pred, emp_pred, use = 'complete.obs', method = 'spearman')) %>%
+  summarise(cor = cor(sim_pred, emp_pred, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(emp_pred, sim_pred)[[1]],
+            f_ratio = log(var.test(emp_pred, sim_pred)[[1]]),
+            t_value = t.test(emp_pred, sim_pred)[[1]]) %>%
   filter(n_markers == 200) %>%
   group_by(cv) %>%
-  summarise(min(correlation),
-            mean(correlation),
-            max(correlation))
+  summarise(min(cor),
+            mean(cor),
+            max(cor),
+            min(ks_d),
+            mean(ks_d),
+            max(ks_d),
+            min(f_ratio),
+            mean(f_ratio),
+            max(f_ratio),
+            min(t_value),
+            mean(t_value),
+            max(t_value))
 
 # Plot out correlation of predictions as n_markers increase
-sim_emp_gp_plot = combined_data %>%
+# Additive plot
+sim_emp_gp_plot_add = combined_data %>%
   filter(effect == 0.1) %>%
   group_by(trait, n_markers, env, model, cv) %>%
-  summarise(correlation = cor(sim_pred, emp_pred, use = 'complete.obs', method = 'spearman')) %>%
+  summarise(cor = cor(sim_pred, emp_pred, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(emp_pred, sim_pred)[[1]],
+            f_ratio = log(var.test(emp_pred, sim_pred)[[1]]),
+            t_value = t.test(emp_pred, sim_pred)[[1]]) %>%
   mutate(cv = paste0('CV', cv)) %>%
   mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
                            trait == 'PHT' ~ 'Plant Height',
@@ -624,31 +1051,147 @@ sim_emp_gp_plot = combined_data %>%
          trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
          model = case_when(model == 'A' ~ 'Additive',
                            model == 'D' ~ 'Dominance')) %>%
-  ggplot(aes(x = n_markers, y = correlation, color = cv))+
-  geom_smooth(se = F)+
-  stat_summary()+
-  scale_color_manual(values = c('darkred', 'darkblue'))+
-  ylim(c(0,1))+
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Additive') %>%
+  ggplot(aes(x = n_markers, y = Performance, color = cv))+
+  geom_smooth(se = F, show.legend = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(geom = 'point', show.legend = F)+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
   labs(x = 'Number of Causitive Markers',
-       y = "Spearman's Rank Correlation Coefficient",
-       color = 'Model Type')+
-  facet_grid(trait~model)+
+       y = NULL,
+       color = 'Model Type',
+       tag = 'A')+
+  facet_grid(Metric~trait, scales = 'free_y')+
   theme_classic()+
   theme(legend.position = 'bottom',
-        text = element_text(size = 12, color = 'black'))
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
 
-sim_emp_gp_plot
+sim_emp_gp_plot_add
 
-ggsave('Manuscript_Figure_6.png', plot = sim_emp_gp_plot, device = 'png', width = 7.5, height = 5.5, units = 'in', dpi = 300)
+ggsave('Manuscript_Figure_6A.png', plot = sim_emp_gp_plot_add, device = 'png', width = 7.5, height = 4, units = 'in', dpi = 300)
+
+# Dominance plot
+sim_emp_gp_plot_dom = combined_data %>%
+  filter(effect == 0.1) %>%
+  group_by(trait, n_markers, env, model, cv) %>%
+  summarise(cor = cor(sim_pred, emp_pred, use = 'complete.obs', method = 'spearman'),
+            ks_d = ks.test(emp_pred, sim_pred)[[1]],
+            f_ratio = log(var.test(emp_pred, sim_pred)[[1]]),
+            t_value = t.test(emp_pred, sim_pred)[[1]]) %>%
+  mutate(cv = paste0('CV', cv)) %>%
+  mutate(trait = case_when(trait == 'EHT' ~ 'Ear Height',
+                           trait == 'PHT' ~ 'Plant Height',
+                           trait == 'Moisture' ~ 'Moisture',
+                           trait == 'YLD' ~ 'Yield'),
+         trait = factor(trait, levels = c('Ear Height', 'Plant Height', 'Moisture', 'Yield')),
+         model = case_when(model == 'A' ~ 'Additive',
+                           model == 'D' ~ 'Dominance')) %>%
+  rename(`Spearman R` = cor,
+         `D Statistic` = ks_d,
+         `log(F Ratio)` = f_ratio,
+         `T Value` = t_value) %>%
+  pivot_longer(cols = c(`Spearman R`,
+                        `D Statistic`,
+                        `log(F Ratio)`,
+                        `T Value`),
+               names_to = 'Metric',
+               values_to = 'Performance') %>%
+  mutate(Metric = factor(Metric, levels = c('Spearman R', 'D Statistic', 'T Value', 'log(F Ratio)'))) %>%
+  filter(model == 'Dominance') %>%
+  ggplot(aes(x = n_markers, y = Performance, color = cv))+
+  geom_smooth(se = F, method = 'lm', formula = 'y~log(x)')+
+  stat_summary(geom = 'point')+
+  scale_color_manual(values = c('darkred', 'cyan4'))+
+  #ylim(c(0,1))+
+  labs(x = 'Number of Causitive Markers',
+       y = NULL,
+       color = 'Model Type',
+       tag = 'B')+
+  facet_grid(Metric~trait, scales = 'free_y')+
+  theme_classic()+
+  theme(legend.position = 'bottom',
+        text = element_text(size = 12, color = 'black'),
+        strip.text = element_text(size = 8))
+
+sim_emp_gp_plot_dom
+
+ggsave('Manuscript_Figure_6B.png', plot = sim_emp_gp_plot_dom, device = 'png', width = 7.5, height = 4.5, units = 'in', dpi = 300)
 
 # Figure S1:
 # Generated during gwas analysis
 
-# Figure S2:
+# Figure S2: 
+# The distribution of p-values from GWAS and where the 100 marker was
+path = '/home/hirschc1/burns756/empirical_sim/analysis/gwas/'
+files = list.files(path,
+                   pattern = 'GAPIT.MLM.BLUE.GWAS.Results.csv',
+                   include.dirs = T,
+                   recursive = T)
+
+data_storage = tibble()
+
+for(file in files){
+  info = str_split(file, '[_/]', simplify = T)
+  trait = info[[1]]
+  location = info[[2]]
+  model = info[[3]]
+  
+  print(paste('---', trait, location, model, '---'))
+  
+  data_storage = data_storage %>%
+    bind_rows(suppressMessages(read_csv(paste0(path, file)) %>%
+                select(P.value) %>%
+                mutate(Trait = trait,
+                       Env = location,
+                       Model = model)))
+}
+
+hundreth_p = data_storage %>%
+  arrange(P.value) %>%
+  group_by(Trait, Env, Model) %>%
+  mutate(rank = row_number()) %>%
+  filter(rank == 100)
+
+hundreth_p %>%
+  view()
+
+p_distribution_plot = data_storage %>%
+  ggplot(aes(x = P.value, fill = Model))+
+  geom_density(alpha = 0.5)+
+  geom_vline(data = hundreth_p,
+             mapping = aes(xintercept = P.value,
+                           color = Model),
+             linetype = 'dashed',
+             show.legend = F)+
+  scale_fill_manual(breaks = c('additive', 'dominant'), values = c('darkviolet', 'steelblue'))+
+  scale_color_manual(breaks = c('additive', 'dominant'), values = c('darkviolet', 'steelblue'))+
+  #coord_trans(x = 'log10')+
+  scale_x_log10()+
+  facet_grid(Env ~ Trait)+
+  labs(x = 'P Value in Log10 Scale')+
+  theme_classic()
+  
+p_distribution_plot
+
+ggsave('Manuscript_Figure_S2.png', plot = p_distribution_plot, device = 'png', width = 7.5, height = 8, units = 'in', dpi = 300)
+
+# Figure S3 and S4:
 # These have just been copied and pasted, but can be saved in the future if needed.
 data_storage = tibble()
 for(trait in c('EHT', 'PHT', 'Moisture', 'YLD')){
-  for(n_marker in c(5,350)){
+  for(n_marker in c(5,200,350)){
     for(effect in c(0.1,1)){
       data_storage = data_storage %>%
         bind_rows(read_delim(paste0('analysis/sim_traits/',
@@ -666,28 +1209,34 @@ for(trait in c('EHT', 'PHT', 'Moisture', 'YLD')){
   }
 }
 
-data_storage %>%
+fig_s2 = data_storage %>%
   filter(effect == 1) %>%
   ggplot(aes(x = sim_value_avg, y = real_pheno, color = env))+
-  geom_point(show.legend = F)+
-  scale_color_viridis_d()+
-  facet_wrap(n_marker~trait, scales = 'free', nrow = 2)+
-  labs(x = 'Simulated Values',
-       y = 'Empirical Values',
-       color = 'Environment',
-       tag = 'A')+
-  theme_classic()
-
-data_storage %>%
-  filter(effect == 0.1) %>%
-  ggplot(aes(x = sim_value_avg, y = real_pheno, color = env))+
   geom_point()+
+  geom_abline(linetype = 'dashed',
+              color = 'gray30')+
   scale_color_viridis_d()+
-  facet_wrap(n_marker~trait, scales = 'free', nrow = 2)+
+  facet_wrap(n_marker~trait, scales = 'free', nrow = 3)+
   labs(x = 'Simulated Values',
        y = 'Empirical Values',
-       color = 'Environment',
-       tag = 'B')+
+       color = 'Environment')+
   theme_classic()+
   theme(legend.position = 'bottom')
 
+ggsave('Manuscript_Figure_S3.png', plot = fig_s2, device = 'png', width = 7.5, height = 6, units = 'in', dpi = 300)
+
+fig_s3 = data_storage %>%
+  filter(effect == 0.1) %>%
+  ggplot(aes(x = sim_value_avg, y = real_pheno, color = env))+
+  geom_point()+
+  geom_abline(linetype = 'dashed',
+              color = 'gray30')+
+  scale_color_viridis_d()+
+  facet_wrap(n_marker~trait, scales = 'free', nrow = 3)+
+  labs(x = 'Simulated Values',
+       y = 'Empirical Values',
+       color = 'Environment')+
+  theme_classic()+
+  theme(legend.position = 'bottom')
+
+ggsave('Manuscript_Figure_S4.png', plot = fig_s3, device = 'png', width = 7.5, height = 6, units = 'in', dpi = 300)

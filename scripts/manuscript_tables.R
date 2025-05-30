@@ -210,6 +210,8 @@ read_delim('analysis/sim_traits/EHT/gwas_markers/gwas_top-350_markers.txt', deli
          `P Value`,
          Significant) %>%
   arrange(Trait, Chromosome, Position, Environment) %>%
+  group_by(Trait,Environment,Type) %>%
+  mutate(Rank = row_number()) %>%
   #summarise(sum(unique(Marker) %in% unique(marker_data$Marker)) / length(unique(marker_data$Marker)))
   write_csv('Manuscript_Table_S8.csv')
 

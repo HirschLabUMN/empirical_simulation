@@ -51,6 +51,14 @@ pheno_pop <- fread(file_pheno, header = TRUE, data.table = FALSE)
 # info_pop <- fread(file_qtns, header = TRUE, data.table = FALSE)
 # log_pop <- scan(file_log, what = "character", sep = "\n")
 
+# Filter for the first two reps only since the empirical data only had 2 reps
+# We need to filter out rep2 for the EHT, 5 markers, effect = 0.1 because too much noise is added in the simulation to be reasonable
+if(stringr::str_detect(file_pheno, "analysis/sim_traits/EHT/traits/michael_method/n_markers_5/effects_0.1")){
+  pheno_pop <- pheno_pop[pheno_pop$Rep != 2,]
+} else{
+  pheno_pop <- pheno_pop[pheno_pop$Rep != 3,] # using rep 1 led to a crazy high pve for env/rep. Lets try using 2 and 3
+}
+
 # adjust column names
 colnames(pheno_pop)[1] <- "genotype"
 colnames(pheno_pop)[NCOL(pheno_pop)] <- "rep"

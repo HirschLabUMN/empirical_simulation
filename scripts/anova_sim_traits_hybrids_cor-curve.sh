@@ -10,10 +10,10 @@
 #SBATCH --mail-user=burns756@umn.edu
 #SBATCH --no-requeue
 
-module load R/4.2.2-openblas 
+module load R/4.3.0-openblas-rocky8 
 
 # go to project folder
-cd ~/empirical_sim
+cd /home/hirschc1/burns756/empirical_sim
 
 for nmarkers in 1 3 5 10 20 30 40 50 60 70 80 90 100 150 200 250 300 350; do
 
