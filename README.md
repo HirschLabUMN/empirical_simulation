@@ -1,6 +1,6 @@
 # Optimizing trait simulations with GWAS
 
-by Michael Burns, Rafael Della Coletta, Sharon Liese, Alex Lipka, Martin Bohn, and Candice Hirsch
+by Michael Burns, Rafael Della Coletta, Alex Lipka, Martin Bohn, and Candice Hirsch
 
 > This project aims to determine the genetic architecture of traits by performing GWAS on empirical data obtained from maize hybrids, simulating traits mirroring these architectures, and running prediction models on both simulated and empirical data. For more details about this analysis, please read the manuscript: **ADD DOI HERE**
 
